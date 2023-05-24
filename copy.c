@@ -7,16 +7,75 @@
 #include <alsa/asoundlib.h>
 #include <pthread.h>
 #include <ctype.h>
+#include <libavformat/avformat.h>
+#include <libswresample/swresample.h>
 #include "const.h"
 
+// 函数传递的参数，由于新建线程传参比较麻烦所以写在全局变量里
+int pipe_fd[2];
+int global_argc;
+char** global_argv;
+char filename[50];
+bool ifend; // 作为信号量控制线程是否结束
+//bool iffinish_producer;
+//bool iffinish_consumer;
 
-char buf1[44];
 
-// 信号量，作为线程间沟通的方法
 
-int main(int argc, char *argv [])
-{
+int mainloop(int argc, char *argv []){
+	// 初始化
+	global_argc = argc;
+	global_argv = argv;
+	init();
+	// 新建线程
+	while(1){
+		// 播放一支曲子
+		// TODO:获取一个新的文件
+		strcpy(filename, "1.wav");
+		int len = strlen(filename);
+		
+		// 创建线程，分类讨论是mp3还是wav
+		pthread_t pthread;
+		if(filename[len-3] == 'm' && filename[len-2] == 'p' && filename[len-1] == '3'){
+			pthread_create(&pthread, NULL, play_mp3, NULL);
+		}else if(filename[len-3] == 'w' && filename[len-2] == 'a' && filename[len-1] == 'v'){
+			pthread_create(&pthread, NULL, play_wav, NULL);
+		}
+		
+		while(1){
+			char str[100];
+			printf("set volume(200-255): ");
+			scanf("%s", str);
 
+			int len = strlen(str);
+			int is_number = 1; // 标记输入是否为数字
+			for (int i = 0; i < len; i++) {
+				if (!isdigit(str[i])) { // 如果有任意一个字符不是数字
+					is_number = 0; // 将标记置为0
+					break;
+				}
+			}
+
+			if (is_number) {
+				value = atoi(str); // 将字符串转换为整数
+				if(value > 0 && value < 256){
+					audio_rec_mixer_set_volume(value);
+				}
+				else{
+					printf("value out of range!\n");
+				}
+			} else {
+				printf("输入异常，请重试。\n");
+			}
+		}
+	}
+}
+
+void init(){
+	av_register_all();
+	avformat_network_init();
+	avcodec_register_all();
+	
 	int ret, rate_arg, format_arg;
 	bool flag = true;
 	int value = 50000;
@@ -26,7 +85,8 @@ int main(int argc, char *argv [])
 		switch(ret){
 			case 'm':
 				printf("打开文件 \n");
-				open_music_file(optarg);
+				//open_music_file(optarg);
+				strcpy(filename, optarg);
 				break;
 			case 'f':
 				format_arg = atoi(optarg);
@@ -174,9 +234,9 @@ int main(int argc, char *argv [])
 
 	debug_msg(snd_pcm_hw_params_set_format(pcm_handle, hw_params, pcm_format), "设置样本长度(位数)");
 	
-	debug_msg(snd_pcm_hw_params_set_rate_near(pcm_handle, hw_params, &wav_header.sample_rate, NULL), "设置采样率");
+	debug_msg(snd_pcm_hw_params_set_rate_near(pcm_handle, hw_params, 44100, NULL), "设置采样率");
 
-	debug_msg(snd_pcm_hw_params_set_channels(pcm_handle, hw_params, wav_header.num_channels), "设置通道数");
+	debug_msg(snd_pcm_hw_params_set_channels(pcm_handle, hw_params, 2), "设置通道数");
 
 	// 设置缓冲区 buffer_size = period_size * periods 一个缓冲区的大小可以这么算，我上面设定了周期为2，
 	// 周期大小我们预先自己设定，那么要设置的缓存大小就是 周期大小 * 周期数 就是缓冲区大小了。
@@ -210,14 +270,48 @@ int main(int argc, char *argv [])
 
 		
 	}
-
-
-
 	// 设置的硬件配置参数，加载，并且会自动调用snd_pcm_prepare()将stream状态置为SND_PCM_STATE_PREPARED
 	debug_msg(snd_pcm_hw_params(pcm_handle, hw_params), "设置的硬件配置参数");
+}
 
+void* play_wav(void* arg){
+	// TODO: 打开音频文件，输出其文件头信息
+	// 直接复制part1的相关代码到此处即可
+	const char* path_name = filename;
+	printf("%s\n", path_name);
+	fp = fopen(path_name, "r");
+	if(fp == NULL){
+    printf("Fail to open file!\n");
+    exit(0);
+  }
+	int num;
+	num = fread(buf1, 1, 44, fp);
+	if(num != 44) {
+		printf("Fail to read file!\n");
+    exit(0);
+	}
+	wav_header = *(struct WAV_HEADER*)buf1;
+	
+	printf("WAV文件头结构体大小:44\n"
+	"RIFF标志:%.4s\n"
+	"文件大小:%u\n"
+	"文件格式:%.4s\n"
+	"格式块标识:%.4s\n"
+	"格式块长度:%u\n"
+	"编码格式代码:%u\n"
+	"声道数:%u\n"
+	"采样频率:%u\n"
+	"传输速率:%u\n"
+	"数据块对齐单位:%u\n"
+	"采样位数(长度):%u\n", wav_header.chunk_id, wav_header.chunk_size, wav_header.format, wav_header.sub_chunk1_id,
+	wav_header.sub_chunk1_size, wav_header.audio_format, wav_header.num_channels, wav_header.sample_rate, wav_header.byte_rate, 
+	wav_header.block_align, wav_header.bits_per_sample);
+	
+	debug_msg(snd_pcm_hw_params_set_rate_near(pcm_handle, hw_params, &wav_header.sample_rate, NULL), "设置采样率");
+	debug_msg(snd_pcm_hw_params_set_channels(pcm_handle, hw_params, wav_header.num_channels), "设置通道数");
+	
 	// feof函数检测文件结束符，结束：非0, 没结束：0 !feof(fp)
-	while(1){
+	while(ifend){
 		// 读取文件数据放到缓存中
 		ret = fread(buff, 1, buffer_size, fp);
 		
@@ -255,45 +349,164 @@ int main(int argc, char *argv [])
 	fclose(fp);
 	snd_pcm_close(pcm_handle);
 	
-	pthread_exit(NULL);  // 终止所有线程
-
-	return 0;
-
+	return NULL;
 }
 
-void open_music_file(const char *path_name){
-	// TODO: 打开音频文件，输出其文件头信息
-	// 直接复制part1的相关代码到此处即可
-	printf("%s\n", path_name);
-	fp = fopen(path_name, "r");
-	if(fp == NULL){
-    printf("Fail to open file!\n");
-    exit(0);
-  }
-	int num;
-	num = fread(buf1, 1, 44, fp);
-	if(num != 44) {
-		printf("Fail to read file!\n");
-    exit(0);
-	}
-	wav_header = *(struct WAV_HEADER*)buf1;
-	
-	printf("WAV文件头结构体大小:44\n"
-	"RIFF标志:%.4s\n"
-	"文件大小:%u\n"
-	"文件格式:%.4s\n"
-	"格式块标识:%.4s\n"
-	"格式块长度:%u\n"
-	"编码格式代码:%u\n"
-	"声道数:%u\n"
-	"采样频率:%u\n"
-	"传输速率:%u\n"
-	"数据块对齐单位:%u\n"
-	"采样位数(长度):%u\n", wav_header.chunk_id, wav_header.chunk_size, wav_header.format, wav_header.sub_chunk1_id,
-	wav_header.sub_chunk1_size, wav_header.audio_format, wav_header.num_channels, wav_header.sample_rate, wav_header.byte_rate, 
-	wav_header.block_align, wav_header.bits_per_sample);
-}
+void* play_mp3(void* arg) {
+    AVFormatContext *fmt_ctx = NULL;
+    AVCodecContext *codec_ctx = NULL;
+    AVCodec *codec = NULL;
+    int audio_stream_index = -1;
 
+    if (avformat_open_input(&fmt_ctx, filename, NULL, NULL) != 0) {
+        printf("Failed to open input file\n");
+        return -1;
+    }
+
+    if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+        printf("Failed to find stream information\n");
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    for (int i = 0; i < fmt_ctx->nb_streams; i++) {
+        if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audio_stream_index = i;
+            break;
+        }
+    }
+
+    if (audio_stream_index == -1) {
+        printf("No audio stream found\n");
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    AVStream *audio_stream = fmt_ctx->streams[audio_stream_index];
+    codec = avcodec_find_decoder(audio_stream->codecpar->codec_id);
+    if (!codec) {
+        printf("Failed to find decoder\n");
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    codec_ctx = avcodec_alloc_context3(codec);
+    if (!codec_ctx) {
+        printf("Failed to allocate codec context\n");
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    if (avcodec_parameters_to_context(codec_ctx, audio_stream->codecpar) < 0) {
+        printf("Failed to copy codec parameters to codec context\n");
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
+        printf("Failed to open codec\n");
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    AVPacket packet;
+    av_init_packet(&packet);
+
+    AVFrame *frame = av_frame_alloc();
+    if (!frame) {
+        printf("Failed to allocate frame\n");
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    struct SwrContext *swr_ctx = swr_alloc();
+    if (!swr_ctx) {
+        printf("Failed to allocate SwrContext\n");
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    uint8_t **dst_data = NULL;
+    int dst_linesize;
+    int dst_nb_channels = 2;
+    enum AVSampleFormat dst_sample_fmt = AV_SAMPLE_FMT_S16;
+    int dst_sample_rate = 44100;
+
+    if (swr_alloc_set_opts(swr_ctx, AV_CH_LAYOUT_STEREO, dst_sample_fmt, dst_sample_rate,
+                           av_get_default_channel_layout(codec_ctx->channels),
+                           codec_ctx->sample_fmt, codec_ctx->sample_rate, 0, NULL) < 0) {
+        printf("Failed to set SwrContext options\n");
+        swr_free(&swr_ctx);
+        av_frame_free(&frame);
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    if (swr_init(swr_ctx) < 0) {
+        printf("Failed to initialize SwrContext\n");
+        swr_free(&swr_ctx);
+        av_frame_free(&frame);
+        avcodec_free_context(&codec_ctx);
+        avformat_close_input(&fmt_ctx);
+        return -1;
+    }
+
+    int max_dst_nb_samples = dst_nb_channels * av_rescale_rnd(codec_ctx->frame_size, dst_sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
+    int dst_buffer_size = av_samples_get_buffer_size(&dst_linesize, dst_nb_channels, max_dst_nb_samples, dst_sample_fmt, 1);
+    uint8_t *dst_buffer = (uint8_t *) av_malloc(dst_buffer_size);
+
+    while (av_read_frame(fmt_ctx, &packet) >= 0 && ifend) {
+        if (packet.stream_index == audio_stream_index) {
+            int ret = avcodec_send_packet(codec_ctx, &packet);
+            if (ret < 0) {
+                printf("Error sending a packet for decoding\n");
+                break;
+            }
+
+            while (ret >= 0) {
+                ret = avcodec_receive_frame(codec_ctx, frame);
+                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                    break;
+                else if (ret < 0) {
+                    printf("Error during decoding\n");
+                    break;
+                }
+
+                swr_convert(swr_ctx, &dst_data, max_dst_nb_samples, (const uint8_t **)frame->data, frame->nb_samples);
+
+                int written = 0;
+                while (written < dst_buffer_size) {
+                    int remaining = dst_buffer_size - written;
+                    int frames_written = snd_pcm_writei(pcm_handle, dst_buffer + written, remaining);
+                    if (frames_written == -EAGAIN || frames_written == -EPIPE) {
+                        snd_pcm_prepare(pcm_handle);
+                    } else if (frames_written < 0) {
+                        printf("Error writing audio to PCM device\n");
+                        break;
+                    } else {
+                        written += frames_written * dst_linesize;
+                    }
+                }
+            }
+        }
+
+        av_packet_unref(&packet);
+    }
+
+    av_frame_free(&frame);
+    avcodec_close(codec_ctx);
+    avformat_close_input(&fmt_ctx);
+
+    swr_free(&swr_ctx);
+    av_free(dst_buffer);
+		
+		return NULL;
+}
 
 bool debug_msg(int result, const char *str)
 {
@@ -357,158 +570,7 @@ int audio_rec_mixer_set_volume(int volume_set)
 	return 0;
 }
 
-void* dynamically_set_volume(){
-	int value = 100;
-	while(1){
-		char str[100];
-		printf("set volume(200-255): ");
-		scanf("%s", str);
-
-		int len = strlen(str);
-		int is_number = 1; // 标记输入是否为数字
-		for (int i = 0; i < len; i++) {
-			if (!isdigit(str[i])) { // 如果有任意一个字符不是数字
-				is_number = 0; // 将标记置为0
-				break;
-			}
-		}
-
-		if (is_number) {
-			value = atoi(str); // 将字符串转换为整数
-			if(value > 0 && value < 256){
-				audio_rec_mixer_set_volume(value);
-			}
-			else{
-				printf("value out of range!\n");
-			}
-		} else {
-			printf("输入异常，请重试。\n");
-		}
-		//sleep(1000);  //留一点缓冲时间
-	}
-	return NULL;
-}
-
-void decode_mp3(const char *filename)
-{
-    AVFormatContext *fmt_ctx = NULL;
-    AVCodecContext *codec_ctx = NULL;
-    AVCodec *codec = NULL;
-    int audio_stream_index = -1;
-
-    av_register_all();
-
-    if (avformat_open_input(&fmt_ctx, filename, NULL, NULL) != 0)
-    {
-        printf("Failed to open input file\n");
-        return;
-    }
-
-    if (avformat_find_stream_info(fmt_ctx, NULL) < 0)
-    {
-        printf("Failed to find stream information\n");
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    for (int i = 0; i < fmt_ctx->nb_streams; i++)
-    {
-        if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
-        {
-            audio_stream_index = i;
-            break;
-        }
-    }
-
-    if (audio_stream_index == -1)
-    {
-        printf("No audio stream found\n");
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    AVStream *audio_stream = fmt_ctx->streams[audio_stream_index];
-    codec = avcodec_find_decoder(audio_stream->codecpar->codec_id);
-    if (!codec)
-    {
-        printf("Failed to find decoder\n");
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    codec_ctx = avcodec_alloc_context3(codec);
-    if (!codec_ctx)
-    {
-        printf("Failed to allocate codec context\n");
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    if (avcodec_parameters_to_context(codec_ctx, audio_stream->codecpar) < 0)
-    {
-        printf("Failed to copy codec parameters to codec context\n");
-        avcodec_free_context(&codec_ctx);
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    if (avcodec_open2(codec_ctx, codec, NULL) < 0)
-    {
-        printf("Failed to open codec\n");
-        avcodec_free_context(&codec_ctx);
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    AVPacket packet;
-    av_init_packet(&packet);
-
-    AVFrame *frame = av_frame_alloc();
-    if (!frame)
-    {
-        printf("Failed to allocate frame\n");
-        avcodec_free_context(&codec_ctx);
-        avformat_close_input(&fmt_ctx);
-        return;
-    }
-
-    while (av_read_frame(fmt_ctx, &packet) >= 0)
-    {
-        if (packet.stream_index == audio_stream_index)
-        {
-            int ret = avcodec_send_packet(codec_ctx, &packet);
-            if (ret < 0)
-            {
-                printf("Error sending a packet for decoding\n");
-                break;
-            }
-
-            while (ret >= 0)
-            {
-                ret = avcodec_receive_frame(codec_ctx, frame);
-                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                    break;
-                else if (ret < 0)
-                {
-                    printf("Error during decoding\n");
-                    break;
-                }
-
-                // Process decoded audio frame
-                pthread_t audioThread;
-                pthread_create(&audioThread, NULL, play_audio, frame->data[0]);
-                pthread_join(audioThread, NULL);
-            }
-        }
-
-        av_packet_unref(&packet);
-    }
-
-    av_frame_free(&frame);
-    avcodec_close(codec_ctx);
-    avformat_close_input(&fmt_ctx);
-}
-
-int decode(const char *filename){
-	
+int main(int argc, char *argv []){
+	mainloop(argc, argv);
+	return 0;
 }
