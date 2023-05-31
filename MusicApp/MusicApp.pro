@@ -17,10 +17,12 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 SOURCES += \
     main.cpp \
-    mainwindow.cpp
+    mainwindow.cpp \
+    musicplayer.cpp
 
 HEADERS += \
-    mainwindow.h
+    mainwindow.h \
+    musicplayer.h
 
 FORMS += \
     mainwindow.ui
@@ -32,3 +34,10 @@ TRANSLATIONS += \
 qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
+
+DISTFILES += \
+    MusicLists/1.wav \
+    MusicLists/Justin-Hurwitz-Mia-_-Sebastian’s-Theme.wav \
+    MusicLists/Ryan-Gosling_Emma-Stone-City-Of-Stars.wav
+
+LIBS += -lasound
