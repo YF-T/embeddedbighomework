@@ -27,14 +27,23 @@ MainWindow::MainWindow(QWidget *parent)
             mp.musicList.append(fileInfo.fileName());
         }
     }
+    mp.musicIndex = 0;
     mp.fileName = mp.musicDir + mp.musicList.at(0);
     qDebug() << "first music name: " << mp.fileName;
+    // play the music
+    mp.play_music();
+
     // set text for music list label
     ui->label_4->setText(fileNames);
     QFont font("Arial", 12);
     ui->label_4->setFont(font);
     ui->label_4->setStyleSheet("QLabel { line-height: 40px; }");
 
+    // set text for music name label
+    ui->label_5->setText(mp.musicList.at(0));
+
+    // set volume bar
+    ui->verticalSlider->setValue(45);
     // connect signal and slot
     connect(ui->pushButton, &QPushButton::clicked, this, &MainWindow::HandlePause);
     connect(ui->pushButton_2, &QPushButton::clicked, this, &MainWindow::HandleBackward);
@@ -49,7 +58,8 @@ MainWindow::MainWindow(QWidget *parent)
 void MainWindow::HandlePause()
 {
     qDebug() << "Click Pause Button";
-    mp.play_music();
+    mp.m_pauseFlag = !mp.m_pauseFlag;
+    qDebug() << "now m_pauseFlag = " << mp.m_pauseFlag;
 }
 
 void MainWindow::HandleForward()
@@ -62,14 +72,24 @@ void MainWindow::HandleForward()
 void MainWindow::HandleBackward()
 {
     qDebug() << "Click Fast Backward Button";
+    pthread_t pthread;
+    pthread_create(&pthread, NULL, play_backward, &mp);
 }
 
 void MainWindow::HandleNextSong(){
     qDebug() << "Click Change Next Song Button";
+    if(mp.musicIndex<mp.musicList.size()-1){
+        ui->label_5->setText(mp.musicList.at(mp.musicIndex+1));
+    }
+    play_next(&mp);
 }
 
 void MainWindow::HandleLastSong(){
     qDebug() << "Click Change Last Song Button";
+    if(mp.musicIndex>0){
+        ui->label_5->setText(mp.musicList.at(mp.musicIndex-1));
+    }
+    play_before(&mp);
 }
 
 void MainWindow::HandleVolumeChanged(){
@@ -85,11 +105,11 @@ void MainWindow::HandleVolumeChanged(){
 
 void MainWindow::HandleVolumeChangedDelayed(){
     sliderTimer.stop();
-
     // Slider Range (0,99)
     QSlider* volumeSlider = ui->verticalSlider;
     qDebug() << "Volume Bar Changed: " << volumeSlider->value();
-
+    int value = volumeSlider->value() * 5 / 9 + 200;
+    mp.audio_rec_mixer_set_volume(value);
 }
 void MainWindow::HandleSpeed(){
     QComboBox* speedCombo = ui->comboBox;

@@ -48,8 +48,10 @@ public:
     QString musicDir;
     QString fileName;
     QList<QString> musicList;
+    int musicIndex;
 
     QList<bool> m_flagList;
+    bool m_pauseFlag;
 
     musicplayer();
     void setFlag(int index);
@@ -62,10 +64,12 @@ private:
 };
 
 bool debug_msg(int result, const char *str);
-void* dynamically_set_volume();
 void* play_wav(void* args);
 void* play_mp3(void* args);
 void* play_forward(void* args);
+void* play_backward(void* args);
+void play_next(void* args);
+void play_before(void* args);
 
 snd_pcm_format_t get_format_arg(uint16_t);
 #endif // MUSICPLAYER_H

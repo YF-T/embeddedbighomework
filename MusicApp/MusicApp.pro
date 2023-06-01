@@ -40,4 +40,7 @@ DISTFILES += \
     MusicLists/Justin-Hurwitz-Mia-_-Sebastian’s-Theme.wav \
     MusicLists/Ryan-Gosling_Emma-Stone-City-Of-Stars.wav
 
+#INCLUDEPATH += /opt/st/myir/3.1-snapshot/sysroots/cortexa7t2hf-neon-vfpv4-ostl-linux-gnueabi/mnt/usb/ffmpeg/include
+#LIBS += -L/opt/st/myir/3.1-snapshot/sysroots/cortexa7t2hf-neon-vfpv4-ostl-linux-gnueabi/mnt/usb/ffmpeg/lib -lavcodec -lavformat -lavutil
+#LIBS += -lasound -lpthread -lswscale -lavdevice -lavfilter -lswresample -ldl -lm -lz -lbz2 -llzma
 LIBS += -lasound
