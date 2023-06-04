@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
+#include <sys/stat.h>
 #include "QDebug"
 #include "QTimer"
 #include "QComboBox"
@@ -15,6 +16,16 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+		
+		const char* folder_name = "TempWav";  // 新文件夹的名称
+
+    // 使用 mkdir 函数创建新文件夹
+    int result = mkdir(folder_name, 0755);
+    if (result == 0) {
+        printf("成功创建文件夹: %s\n", folder_name);
+    } else {
+        printf("无法创建文件夹: %s\n", folder_name);
+    }
 
     // get music name
     QDir directory("./MusicLists");

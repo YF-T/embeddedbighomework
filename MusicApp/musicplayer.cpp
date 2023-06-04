@@ -1,3 +1,8 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dirent.h>
+
 #include "musicplayer.h"
 //extern "C" {
 //    #include <libavformat/avformat.h>
@@ -7,6 +12,123 @@
 #include "pthread.h"
 #include "QtDebug"
 #include "QList"
+
+#define MINIMP3_IMPLEMENTATION 
+#include "minimp3.h"
+
+typedef struct {
+    char chunk_id[4];
+    uint32_t chunk_size;
+    char format[4];
+    char subchunk1_id[4];
+    uint32_t subchunk1_size;
+    uint16_t audio_format;
+    uint16_t num_channels;
+    uint32_t sample_rate;
+    uint32_t byte_rate;
+    uint16_t block_align;
+    uint16_t bits_per_sample;
+    char subchunk2_id[4];
+    uint32_t subchunk2_size;
+} WAVHeader;
+
+void write_wav_header(FILE* file, uint32_t sample_rate, uint16_t num_channels, uint16_t bits_per_sample, uint32_t data_size) {
+    WAVHeader header;
+    memcpy(header.chunk_id, "RIFF", 4);
+    header.chunk_size = data_size + sizeof(WAVHeader) - 8;
+    memcpy(header.format, "WAVE", 4);
+    memcpy(header.subchunk1_id, "fmt ", 4);
+    header.subchunk1_size = 16;
+    header.audio_format = 1;
+    header.num_channels = num_channels;
+    header.sample_rate = sample_rate;
+    header.byte_rate = sample_rate * num_channels * bits_per_sample / 8;
+    header.block_align = num_channels * bits_per_sample / 8;
+    header.bits_per_sample = bits_per_sample;
+    memcpy(header.subchunk2_id, "data", 4);
+    header.subchunk2_size = data_size;
+
+    fwrite(&header, sizeof(WAVHeader), 1, file);
+}
+
+void print_frame_info(const mp3dec_frame_info_t* info) {
+    printf("Frame info:\n");
+    printf("    hz: %d\n", info->hz);
+    printf("    channels: %d\n", info->channels);
+    printf("    layer: %d\n", info->layer);
+    printf("    frame_bytes: %d\n", info->frame_bytes);
+}
+
+short pcm_buffer[MINIMP3_MAX_SAMPLES_PER_FRAME];  // Temporary storage for decoded PCM data
+
+int mp3towav(const char* input_filename, const char* output_filename) {
+
+    // Open MP3 file
+    FILE* mp3_file = fopen(input_filename, "rb");
+    if (!mp3_file) {
+        printf("无法打开输入文件\n");
+        return 1;
+    }
+
+    // Create and initialize decoder
+    mp3dec_t mp3d;
+    mp3dec_init(&mp3d);
+
+    // Create WAV file
+    FILE* wav_file = fopen(output_filename, "wb");
+    if (!wav_file) {
+        printf("无法创建输出文件\n");
+        return 1;
+    }
+		
+		//获取MP3文件长度
+		fseek(mp3_file, 0, SEEK_END);
+		int totalLen = (int)ftell(mp3_file);
+
+		//读取整个MP3文件
+		fseek(mp3_file, 0, SEEK_SET);
+		unsigned char *inMp3 = (unsigned char*)malloc(totalLen);
+		fread(inMp3, 1, totalLen, mp3_file);
+		fclose(mp3_file);
+		
+		int inLen = 0;
+
+    // Decode and write to WAV file
+    int mp3_buffer_size = 4096;
+    
+    mp3dec_frame_info_t info;
+    while (1) {
+        // Read MP3 data
+        /*int read_size = fread(mp3_buffer, 1, mp3_buffer_size, mp3_file);
+        if (read_size <= 0) {
+            break;  // Finished reading or error, exit loop
+        }
+				printf("读取到:%d", read_size);*/
+
+        // Decode MP3 data
+        int frame_size = mp3dec_decode_frame(&mp3d, inMp3 + inLen, totalLen - inLen, pcm_buffer, &info);
+				inLen += info.frame_bytes;
+        if (frame_size <= 0) {
+            break;
+        }
+
+        // Write to WAV file
+        int write_size = fwrite(pcm_buffer, sizeof(short), frame_size * info.channels, wav_file);
+    }
+		
+
+    // Go back to the beginning of the file and write the WAV file header
+    fseek(wav_file, 0, SEEK_SET);
+    write_wav_header(wav_file, info.hz, info.channels, 16, ftell(wav_file) - sizeof(WAVHeader));
+
+    // Close files and decoder
+    fclose(wav_file);
+		free(inMp3);
+
+    printf("转换完成\n");
+
+    return 0;
+}
 
 musicplayer::musicplayer()
 {
@@ -113,162 +235,21 @@ void* play_mp3(void* args){
     qDebug() << "Play mp3 now";
     musicplayer* player = static_cast<musicplayer*>(args);
     player->setFlag(0);
+		
+		QString modifiedPath = player->fileName;
+		modifiedPath.replace("MusicLists/", "TempWav/").replace(".mp3", ".wav");
 
-//    AVFormatContext *fmt_ctx = NULL;
-//    AVCodecContext *codec_ctx = NULL;
-
-//    int audio_stream_index = -1;
-
-//    if (avformat_open_input(&fmt_ctx, player->fileName.toUtf8().constData(), NULL, NULL) != 0) {
-//        printf("Failed to open input file\n");
-//        return NULL;
-//    }
-
-//    if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
-//        printf("Failed to find stream information\n");
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    for (int i = 0; i < fmt_ctx->nb_streams; i++) {
-//        if (fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
-//            audio_stream_index = i;
-//            break;
-//        }
-//    }
-
-//    if (audio_stream_index == -1) {
-//        printf("No audio stream found\n");
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    AVStream *audio_stream = fmt_ctx->streams[audio_stream_index];
-//    const AVCodec *codec = avcodec_find_decoder(audio_stream->codecpar->codec_id);
-//    if (!codec) {
-//        printf("Failed to find decoder\n");
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    codec_ctx = avcodec_alloc_context3(codec);
-//    if (!codec_ctx) {
-//        printf("Failed to allocate codec context\n");
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    if (avcodec_parameters_to_context(codec_ctx, audio_stream->codecpar) < 0) {
-//        printf("Failed to copy codec parameters to codec context\n");
-//        avcodec_free_context(&codec_ctx);
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
-//        printf("Failed to open codec\n");
-//        avcodec_free_context(&codec_ctx);
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    AVPacket packet;
-//    av_init_packet(&packet);
-
-//    AVFrame *frame = av_frame_alloc();
-//    if (!frame) {
-//        printf("Failed to allocate frame\n");
-//        avcodec_free_context(&codec_ctx);
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    struct SwrContext *swr_ctx = swr_alloc();
-//    if (!swr_ctx) {
-//        printf("Failed to allocate SwrContext\n");
-//        avcodec_free_context(&codec_ctx);
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    uint8_t *dst_data = NULL;
-//    int dst_linesize;
-//    int dst_nb_channels = 2;
-//    enum AVSampleFormat dst_sample_fmt = AV_SAMPLE_FMT_S16;
-//    int dst_sample_rate = 44100;
-
-//    swr_alloc_set_opts(swr_ctx, AV_CH_LAYOUT_STEREO, dst_sample_fmt, dst_sample_rate,
-//                               av_get_default_channel_layout(codec_ctx->channels),
-//                               codec_ctx->sample_fmt, codec_ctx->sample_rate, 0, NULL);
-////    if (swr_alloc_set_opts(swr_ctx, AV_CH_LAYOUT_STEREO, dst_sample_fmt, dst_sample_rate,
-////                           av_get_default_channel_layout(codec_ctx->channels),
-////                           codec_ctx->sample_fmt, codec_ctx->sample_rate, 0, NULL) != 0) {
-////        printf("Failed to set SwrContext options\n");
-////        swr_free(&swr_ctx);
-////        av_frame_free(&frame);
-////        avcodec_free_context(&codec_ctx);
-////        avformat_close_input(&fmt_ctx);
-////        return NULL;
-////    }
-
-//    if (swr_init(swr_ctx) < 0) {
-//        printf("Failed to initialize SwrContext\n");
-//        swr_free(&swr_ctx);
-//        av_frame_free(&frame);
-//        avcodec_free_context(&codec_ctx);
-//        avformat_close_input(&fmt_ctx);
-//        return NULL;
-//    }
-
-//    int max_dst_nb_samples = dst_nb_channels * av_rescale_rnd(codec_ctx->frame_size, dst_sample_rate, codec_ctx->sample_rate, AV_ROUND_UP);
-//    int dst_buffer_size = av_samples_get_buffer_size(&dst_linesize, dst_nb_channels, max_dst_nb_samples, dst_sample_fmt, 1);
-//    uint8_t *dst_buffer = (uint8_t *) av_malloc(dst_buffer_size);
-
-//    while (av_read_frame(fmt_ctx, &packet) >= 0 && player->m_flagList.at(0) == true) {
-//        if (packet.stream_index == audio_stream_index) {
-//            int ret = avcodec_send_packet(codec_ctx, &packet);
-//            if (ret < 0) {
-//                printf("Error sending a packet for decoding\n");
-//                break;
-//            }
-
-//            while (ret >= 0) {
-//                ret = avcodec_receive_frame(codec_ctx, frame);
-//                if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-//                    break;
-//                else if (ret < 0) {
-//                    printf("Error during decoding\n");
-//                    break;
-//                }
-
-//                ret = swr_convert(swr_ctx, &dst_data, max_dst_nb_samples, (const uint8_t **)frame->data, frame->nb_samples);
-
-//                int written = 0;
-//                while (written < dst_buffer_size) {
-//                    int remaining = dst_buffer_size - written;
-//                    int frames_written = snd_pcm_writei(player->pcm_handle, dst_buffer + written, remaining);
-//                    if (frames_written == -EAGAIN || frames_written == -EPIPE) {
-//                        snd_pcm_prepare(player->pcm_handle);
-//                    } else if (frames_written < 0) {
-//                        printf("Error writing audio to PCM device\n");
-//                        break;
-//                    } else {
-//                        written += frames_written * dst_linesize;
-//                    }
-//                }
-//            }
-//        }
-
-//        av_packet_unref(&packet);
-//    }
-
-//    av_frame_free(&frame);
-//    avcodec_close(codec_ctx);
-//    avformat_close_input(&fmt_ctx);
-
-//    swr_free(&swr_ctx);
-//    av_free(dst_buffer);
-
+    int result = access(modifiedPath.toUtf8().constData() , F_OK);
+    if (result == 0) {
+        printf("文件存在: \n");
+    } else {
+        printf("文件不存在: \n");
+				mp3towav(player->fileName.toUtf8().constData(), modifiedPath.toUtf8().constData());
+    }
+		player->fileName = modifiedPath;
+		
+		play_wav(args);
+		
     return NULL;
 }
 
