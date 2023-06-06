@@ -22,6 +22,7 @@ SOURCES += \
 
 HEADERS += \
     mainwindow.h \
+    minimp3.h \
     musicplayer.h
 
 FORMS += \

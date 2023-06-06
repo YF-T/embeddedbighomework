@@ -45,6 +45,9 @@ public:
     unsigned char *buff;
     char buf1[44];
 
+    int targetSpeedIndex;
+    float speed;
+
     QString musicDir;
     QString fileName;
     QList<QString> musicList;
@@ -54,6 +57,7 @@ public:
     bool m_pauseFlag;
 
     musicplayer();
+
     void setFlag(int index);
     void play_music();
     int audio_rec_mixer_set_volume(int volume_set);
@@ -63,6 +67,7 @@ private:
 
 };
 
+void* generate_speed_wav(void* args);
 bool debug_msg(int result, const char *str);
 void* play_wav(void* args);
 void* play_mp3(void* args);
@@ -70,6 +75,8 @@ void* play_forward(void* args);
 void* play_backward(void* args);
 void play_next(void* args);
 void play_before(void* args);
+void* play_backward(void* args);
+void* change_speed(void* args);
 
 snd_pcm_format_t get_format_arg(uint16_t);
 #endif // MUSICPLAYER_H

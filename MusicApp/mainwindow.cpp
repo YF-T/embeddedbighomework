@@ -16,17 +16,6 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
-		
-		const char* folder_name = "TempWav";  // 新文件夹的名称
-
-    // 使用 mkdir 函数创建新文件夹
-    int result = mkdir(folder_name, 0755);
-    if (result == 0) {
-        printf("成功创建文件夹: %s\n", folder_name);
-    } else {
-        printf("无法创建文件夹: %s\n", folder_name);
-    }
-
     // get music name
     QDir directory("./MusicLists");
     QFileInfoList fileList = directory.entryInfoList();
@@ -41,6 +30,9 @@ MainWindow::MainWindow(QWidget *parent)
     mp.musicIndex = 0;
     mp.fileName = mp.musicDir + mp.musicList.at(0);
     qDebug() << "first music name: " << mp.fileName;
+    // generate speed up music
+    pthread_t pthread;
+    pthread_create(&pthread, NULL, generate_speed_wav, &mp);
     // play the music
     mp.play_music();
 
@@ -124,7 +116,10 @@ void MainWindow::HandleVolumeChangedDelayed(){
 }
 void MainWindow::HandleSpeed(){
     QComboBox* speedCombo = ui->comboBox;
-    qDebug() << "Speed Combo Box Changed: " << speedCombo->currentIndex() << "-" << speedCombo->currentText();
+    mp.targetSpeedIndex = speedCombo->currentIndex();
+    qDebug() << "Speed Combo Box Changed: " << mp.targetSpeedIndex << "-" << speedCombo->currentText();
+    pthread_t pthread;
+    pthread_create(&pthread, NULL, change_speed, &mp);
 }
 
 MainWindow::~MainWindow()

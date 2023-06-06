@@ -12,6 +12,7 @@
 #include "pthread.h"
 #include "QtDebug"
 #include "QList"
+#include "QDir"
 
 #define MINIMP3_IMPLEMENTATION 
 #include "minimp3.h"
@@ -140,7 +141,27 @@ musicplayer::musicplayer()
         m_flagList.append(false);
     }
     m_pauseFlag = false;
-    //init all parameters
+    speed = 1.0;
+    targetSpeedIndex = 0;
+    // make directory if not exists
+    QString tempMusicPath = "TempWav";
+    QDir tempMusicDir(tempMusicPath);
+    if (!tempMusicDir.exists()) {
+        if (tempMusicDir.mkpath(".")) {
+        } else {
+           }
+        } else {
+        }
+
+    QString speedMusicPath = "SpeedWav";
+    QDir speedMusicDir(speedMusicPath);
+    if (!speedMusicDir.exists()) {
+        if (speedMusicDir.mkpath(".")) {
+        } else {
+           }
+        } else {
+        }
+    // init all parameters
     // 在堆栈上分配snd_pcm_hw_params_t结构体的空间，参数是配置pcm硬件的指针,返回0成功
     debug_msg(snd_pcm_hw_params_malloc(&hw_params), "分配snd_pcm_hw_params_t结构体");
 
@@ -231,24 +252,56 @@ int musicplayer::audio_rec_mixer_set_volume(int volume_set){
         return 0;
 }
 
+void* generate_speed_wav(void* args){
+    qDebug() << "generate speed wav...";
+    musicplayer* player = static_cast<musicplayer*>(args);
+    for(int index = 0; index<player->musicList.size(); index++){
+        QString srcMusicName = player->musicDir + player->musicList.at(index);
+        QString musicName = player->musicList.at(index);
+        for(int type = 1; type < 4; type++){
+            QString targetMusicName = "SpeedWav/";
+            float targetSpeed = 1.0;
+            switch(type){
+            case 1:
+                targetSpeed = 0.5;
+                targetMusicName += "A" + musicName;
+                break;
+            case 2:
+                targetSpeed = 1.5;
+                targetMusicName += "B" + musicName;
+                break;
+            case 3:
+                targetSpeed = 2.0;
+                targetMusicName += "C" + musicName;
+                break;
+            }
+            int result = access(targetMusicName.toUtf8().constData() , F_OK);
+            if(result != 0){
+                QString Qcommand = "ffmpeg -i " + srcMusicName + " -filter:a \"atempo=" + QString::number(targetSpeed) + "\" -vn " + targetMusicName + " > /dev/null 2>&1";
+                const char* command = Qcommand.toUtf8().constData();
+                system(command);
+            }
+        }
+    }
+    qDebug() << "end generate speed wav...";
+    return NULL;
+}
+
 void* play_mp3(void* args){
     qDebug() << "Play mp3 now";
     musicplayer* player = static_cast<musicplayer*>(args);
     player->setFlag(0);
-		
-		QString modifiedPath = player->fileName;
-		modifiedPath.replace("MusicLists/", "TempWav/").replace(".mp3", ".wav");
+
+    QString modifiedPath = player->fileName;
+    modifiedPath.replace("MusicLists/", "TempWav/").replace(".mp3", ".wav");
 
     int result = access(modifiedPath.toUtf8().constData() , F_OK);
-    if (result == 0) {
-        printf("文件存在: \n");
-    } else {
-        printf("文件不存在: \n");
-				mp3towav(player->fileName.toUtf8().constData(), modifiedPath.toUtf8().constData());
+    if (result != 0) {
+        mp3towav(player->fileName.toUtf8().constData(), modifiedPath.toUtf8().constData());
     }
-		player->fileName = modifiedPath;
+    player->fileName = modifiedPath;
 		
-		play_wav(args);
+    play_wav(args);
 		
     return NULL;
 }
@@ -270,6 +323,8 @@ void* play_wav(void* args){
         printf("Fail to read file!\n");
         exit(0);
     }
+    int offset = ftell(player->fp);
+    qDebug() << "offset after read wav header is " << offset;
     player->wav_header = *(struct WAV_HEADER*)player->buf1;
     qDebug() << "bits_per_sample: "<<player->wav_header.bits_per_sample;
 
@@ -357,9 +412,6 @@ void* play_forward(void* args){
         printf("Error getting sample rate\n");
         return NULL;
     }
-    // 计算每秒音频帧数
-    snd_pcm_uframes_t frames_per_sec;
-    snd_pcm_hw_params_get_period_size(player->hw_params, &frames_per_sec, &dir);
     // 计算快进/快退的帧数，默认快进快退都是10秒
     snd_pcm_uframes_t seek_frames = -rate * 10 * 2 * 2;
     // 到这里为止快退和快进的预操作相同
@@ -384,9 +436,6 @@ void* play_backward(void* args){
         printf("Error getting sample rate\n");
         return NULL;
     }
-    // 计算每秒音频帧数
-    snd_pcm_uframes_t frames_per_sec;
-    snd_pcm_hw_params_get_period_size(player->hw_params, &frames_per_sec, &dir);
     // 计算快进/快退的帧数，默认快进快退都是10秒
     snd_pcm_uframes_t seek_frames = rate * 10 * 2 * 2;
     // 到这里为止快退和快进的预操作相同
@@ -398,6 +447,92 @@ void* play_backward(void* args){
     }
     // 播放音频数据
     qDebug() << "Play backward end";
+    return NULL;
+}
+
+void* change_speed(void* args){
+    qDebug() << "Change speed";
+    musicplayer* player = static_cast<musicplayer*>(args);
+    // check if music is mp3 format
+    QString musicName = player->musicList.at(player->musicIndex);
+    QString musicFormat = musicName.right(3);
+    QString srcMusicName = "";
+    if(musicFormat.compare("mp3", Qt::CaseInsensitive) == 0){
+        musicName.replace(musicName.length() - 3, 3, "wav");
+        srcMusicName = "TempWav/" + musicName;
+    } else {
+        srcMusicName = player->musicDir + musicName;
+    }
+    
+    // map index to target speed
+    float targetSpeed = 1.0;
+    QString targetMusicName = "SpeedWav/" ;
+    switch(player->targetSpeedIndex){
+    case 0:
+        targetSpeed = 1.0;
+        targetMusicName = srcMusicName;
+        break;
+    case 1:
+        targetSpeed = 0.5;
+        targetMusicName += "A" + musicName;
+        break;
+    case 2:
+        targetSpeed = 1.5;
+        targetMusicName += "B" + musicName;
+        break;
+    case 3:
+        targetSpeed = 2.0;
+        targetMusicName += "C" + musicName;
+        break;
+    default:
+        return NULL;
+    }
+
+    // check whether need handle
+    qDebug() << "now speed: "<< player->speed <<"target speed: " << targetSpeed;
+
+    if(targetSpeed == player->speed){
+        qDebug() << "target speed equals now speed, return";
+        return NULL;
+    }
+    
+    unsigned int rate;
+    int dir;
+    if (snd_pcm_hw_params_get_rate(player->hw_params, &rate, &dir) < 0) {
+        printf("Error getting sample rate\n");
+        return NULL;
+    }
+
+    // 播放新文件
+
+    while(access(targetMusicName.toUtf8().constData() , F_OK)){
+        qDebug() << "speed up music is generating...";
+        sleep(50);
+    }
+
+    // get offset of fp
+    long offset = ftell(player->fp);
+    float new_offset_float = (offset - 44) * player->speed / targetSpeed ;
+    long new_offset = long(new_offset_float);
+    fclose(player->fp);
+    player->fp = nullptr;
+    qDebug() << "new offset in target file is " << new_offset;
+    // set speed to targetSpeed
+    player->speed = targetSpeed;
+    // set player->fileName
+    player->fileName = targetMusicName;
+    qDebug() << "file to open: " << player->fileName.toUtf8().constData();
+
+    // play wav
+    // get file name
+    player->fp = fopen(player->fileName.toUtf8().constData(), "r");
+    if(player->fp == NULL){
+        printf("Fail to open file!\n");
+        exit(0);
+    }
+
+    fseek(player->fp, 44 + new_offset, SEEK_CUR);
+    qDebug() << "Change speed end";
     return NULL;
 }
 
